@@ -1,65 +1,118 @@
-import Image from "next/image";
+import { createClient } from '@/lib/supabase/server'
+import type { LeaderboardEntry } from '@/types'
 
-export default function Home() {
+export const dynamic = 'force-dynamic'
+
+export default async function HomePage() {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+
+  const { data: predictions } = await supabase
+    .from('predictions')
+    .select('user_id, points, profiles(name)')
+    .not('points', 'is', null)
+
+  const map = new Map<string, LeaderboardEntry>()
+
+  for (const pred of predictions ?? []) {
+    const profileRaw = pred.profiles
+    const profile = (Array.isArray(profileRaw) ? profileRaw[0] : profileRaw) as { name: string } | null
+    if (!profile) continue
+
+    const existing = map.get(pred.user_id) ?? {
+      user_id: pred.user_id,
+      name: profile.name,
+      total_points: 0,
+      exact_scores: 0,
+      correct_winners: 0,
+      total_predictions: 0,
+    }
+
+    existing.total_points += pred.points ?? 0
+    existing.total_predictions += 1
+    if (pred.points === 5) existing.exact_scores += 1
+    if (pred.points === 3) existing.correct_winners += 1
+
+    map.set(pred.user_id, existing)
+  }
+
+  const leaderboard = Array.from(map.values()).sort(
+    (a, b) => b.total_points - a.total_points || b.exact_scores - a.exact_scores
+  )
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-1">🏆 Tabla de Posiciones</h1>
+        <p className="text-slate-400 text-sm">
+          5 pts marcador exacto · 3 pts ganador correcto · 0 pts error
+        </p>
+      </div>
+
+      {leaderboard.length === 0 ? (
+        <div className="text-center py-20 text-slate-500">
+          <div className="text-5xl mb-4">📊</div>
+          <p>Aún no hay puntos registrados.</p>
+          <p className="text-sm mt-1">Los puntos aparecen cuando terminen los partidos.</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      ) : (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-6 py-4">#</th>
+                <th className="text-left px-4 py-4">Nombre</th>
+                <th className="text-center px-4 py-4">Pts</th>
+                <th className="text-center px-4 py-4 hidden sm:table-cell">⭐ Exactos</th>
+                <th className="text-center px-4 py-4 hidden sm:table-cell">✅ Ganador</th>
+                <th className="text-center px-4 py-4 hidden md:table-cell">Jugadas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leaderboard.map((entry, idx) => {
+                const isMe = entry.user_id === user?.id
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null
+
+                return (
+                  <tr
+                    key={entry.user_id}
+                    className={`border-b border-slate-800/50 transition-colors ${
+                      isMe ? 'bg-emerald-500/5' : 'hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <td className="px-6 py-4 text-sm font-medium">
+                      {medal ?? <span className="text-slate-600">{idx + 1}</span>}
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`font-semibold ${isMe ? 'text-emerald-400' : ''}`}>
+                        {entry.name}
+                      </span>
+                      {isMe && (
+                        <span className="ml-2 text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">
+                          tú
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className="text-amber-400 font-bold text-lg">{entry.total_points}</span>
+                    </td>
+                    <td className="px-4 py-4 text-center text-slate-300 hidden sm:table-cell">
+                      {entry.exact_scores}
+                    </td>
+                    <td className="px-4 py-4 text-center text-slate-300 hidden sm:table-cell">
+                      {entry.correct_winners}
+                    </td>
+                    <td className="px-4 py-4 text-center text-slate-500 text-sm hidden md:table-cell">
+                      {entry.total_predictions}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
-      </main>
+      )}
     </div>
-  );
+  )
 }
