@@ -2,40 +2,45 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Profile } from '@/types'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export default function Header() {
   const pathname = usePathname()
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [signOutFn, setSignOutFn] = useState<(() => Promise<void>) | null>(null)
-
-  const loadProfile = useCallback(async () => {
-    const { createClient } = await import('@/lib/supabase/client')
-    const supabase = createClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single()
-
-    setProfile(data)
-
-    setSignOutFn(() => async () => {
-      await supabase.auth.signOut()
-      router.push('/login')
-      router.refresh()
-    })
-  }, [router])
+  const clientRef = useRef<SupabaseClient | null>(null)
 
   useEffect(() => {
-    loadProfile()
-  }, [loadProfile])
+    let cancelled = false
+    async function init() {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      clientRef.current = supabase
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user || cancelled) return
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+
+      if (!cancelled) setProfile(data)
+    }
+    init()
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleSignOut() {
+    if (clientRef.current) {
+      await clientRef.current.auth.signOut()
+    }
+    router.push('/login')
+    router.refresh()
+  }
 
   if (pathname === '/login' || pathname === '/setup') return null
 
@@ -73,18 +78,15 @@ export default function Header() {
           {profile && (
             <span className="text-sm text-slate-400 hidden sm:block">{profile.name}</span>
           )}
-          {signOutFn && (
-            <button
-              onClick={signOutFn}
-              className="text-sm text-slate-400 hover:text-slate-100 transition-colors px-3 py-1.5 rounded-lg hover:bg-slate-800"
-            >
-              Salir
-            </button>
-          )}
+          <button
+            onClick={handleSignOut}
+            className="text-sm text-slate-400 hover:text-slate-100 transition-colors px-3 py-1.5 rounded-lg hover:bg-slate-800"
+          >
+            Salir
+          </button>
         </div>
       </div>
 
-      {/* Mobile nav */}
       <div className="sm:hidden flex border-t border-slate-800">
         {navLinks.map(({ href, label }) => (
           <Link
