@@ -18,8 +18,8 @@ function formatDate(dateStr: string) {
   })
 }
 
-function isPast(dateStr: string) {
-  return new Date(dateStr) < new Date()
+function isClosed(dateStr: string) {
+  return new Date(dateStr).getTime() - 30 * 60 * 1000 <= Date.now()
 }
 
 function getResultLabel(pts: number | null | undefined) {
@@ -131,7 +131,7 @@ function MatchCard({
   match: MatchWithPrediction
   onPredict: (m: Match) => void
 }) {
-  const past = isPast(match.match_date)
+  const closed = isClosed(match.match_date)
   const pred = match.prediction
   const resultLabel = getResultLabel(pred?.points)
 
@@ -181,7 +181,7 @@ function MatchCard({
                 <span className={`text-xs px-2 py-0.5 rounded font-medium mt-1 inline-block ${resultLabel.cls}`}>
                   {resultLabel.label} · {pred.points}pts
                 </span>
-              ) : !past ? (
+              ) : !closed ? (
                 <button
                   onClick={() => onPredict(match)}
                   className="text-xs text-emerald-400 hover:text-emerald-300 mt-1 block"
@@ -192,8 +192,8 @@ function MatchCard({
                 <span className="text-xs text-slate-600 mt-1 block">Pendiente</span>
               )}
             </div>
-          ) : past ? (
-            <span className="text-xs text-red-400/60">Sin predicción</span>
+          ) : closed ? (
+            <span className="text-xs text-red-400/60">Cerrado</span>
           ) : (
             <button
               onClick={() => onPredict(match)}
@@ -224,8 +224,11 @@ export default function PredictionsPage() {
       if (!user) return
       setUserId(user.id)
 
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+
       const [{ data: matchData }, { data: predData }] = await Promise.all([
-        supabase.from('matches').select('*').order('match_date', { ascending: true }),
+        supabase.from('matches').select('*').gte('match_date', todayStart.toISOString()).order('match_date', { ascending: true }),
         supabase.from('predictions').select('*').eq('user_id', user.id),
       ])
 
@@ -311,7 +314,7 @@ export default function PredictionsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold mb-1">⚽ Mis Predicciones</h1>
         <p className="text-slate-400 text-sm">
-          Solo puedes predecir antes de que empiece el partido
+          Las predicciones cierran 30 minutos antes de cada partido
         </p>
       </div>
 
